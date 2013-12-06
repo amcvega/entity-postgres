@@ -28,3 +28,19 @@ library
                      , convertible
                      , text
   default-language:    Haskell2010
+
+test-suite testit
+  hs-source-dirs:      test
+  main-is:             Main.hs
+  type:                exitcode-stdio-1.0
+  build-depends:       base
+                     , quickcheck-instances
+                     , test-framework
+                     , test-framework-quickcheck2
+                     , test-framework-hunit
+                     , HUnit
+                     , postgresql-simple
+                     , entity
+                     , entity-postgres
+                     , text
+                     , time
