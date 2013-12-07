@@ -30,17 +30,15 @@ main = do
 tests conn = [
     testGroup "To Field Tests" [
          testProperty "Integer" $ \x ->
-            (show $ toField x) == (show $ toField $ StoreInt x)
+            show (toField x) == show (toField $ StoreInt x)
          , testProperty "Text" $ \x ->
-             (show $ toField x) == (show $ toField $ StoreText x)
+             show ( toField x) == show ( toField $ StoreText x)
          , testProperty "Day" $ \x ->
-             (show $ toField x) ==
-             (show $ toField $ StoreDay x)
+             show (toField x) == show (toField $ StoreDay x)
          , testProperty "Double" $ \x ->
-             (show $ toField x ) == (show $ toField $ StoreDouble x)
+             show ( toField x ) == show ( toField $ StoreDouble x)
          , testProperty "UTCTime" $ \x ->
-             (show $ toField x) ==
-             (show $ toField $ StoreUTCTime x)
+             show ( toField x) == show ( toField $ StoreUTCTime x)
          ]
     , testGroup "From Field Tests" [
            buildTest $ do

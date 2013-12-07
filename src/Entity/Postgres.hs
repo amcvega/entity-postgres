@@ -30,7 +30,7 @@ storeParser f mbs
         StoreUTCTime <$> fromField f mbs
     | t `elem` map typoid [float8, float4] =
         StoreDouble <$> fromField f mbs
-    | t == typoid numeric = StoreDouble <$> (fromRational <$> fromField f mbs)
+    | t == typoid numeric = StoreDouble <$> fromRational <$> fromField f mbs
     | otherwise =  returnError ConversionFailed f $  "invalid oid: " ++ (show t)
     where
         t = typeOid f
