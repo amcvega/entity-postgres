@@ -19,7 +19,8 @@ library
   hs-source-dirs:      src
   exposed-modules:     Entity.Postgres
 
-  -- other-modules:       
+  other-modules:       Entity.Postgres.Instances
+                     , Entity.Postgres.Interface
   -- other-extensions:    
   build-depends:       base >=4.6 && <4.7
                      , entity
@@ -27,6 +28,7 @@ library
                      , time
                      , convertible
                      , text
+                     , bytestring
   default-language:    Haskell2010
 
 test-suite testit
