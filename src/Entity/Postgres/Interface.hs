@@ -1,6 +1,8 @@
-{-# LANGUAGE OverloadedStrings, RecordWildCards #-}
+{-# LANGUAGE OverloadedStrings, RecordWildCards, GADTs, FlexibleContexts #-}
 module Entity.Postgres.Interface where
 
+
+import Data.Convertible (Convertible)
 import Data.Data (Typeable)
 import qualified Data.Text as T
 import qualified Data.ByteString.Char8 as B
@@ -11,11 +13,25 @@ import Text.Printf (printf)
 
 import Database.PostgreSQL.Simple as PQ
 import Database.PostgreSQL.Simple.Types (Query(..))
+import Database.PostgreSQL.Simple.ToField (toField)
+import Database.PostgreSQL.Simple.ToRow (toRow)
 
 import Entity.Postgres.Instances
 
 
 import Entity hiding (query)
+
+
+evalCommonPG :: Connection -> CommonI a -> IO (Either String a)
+evalCommonPG db fn = case fn of
+    FindRecord x -> findRecord db x
+    CreateRecord plan -> createRecord db plan
+    UpdateRecord old new -> updateRecord db old new
+    DeleteRecord e -> deleteRecord db e
+    FindRecordsByIndices filters -> findRecordsMulti db filters
+    FilterQuery q -> filterQuery db q
+    FindRecordByUnique attr val -> findRecordByUnique db attr val
+
 
 filterStore :: [Filter a] -> a
 filterStore = undefined
@@ -23,21 +39,83 @@ filterStore = undefined
 keyStore :: Key a -> a
 keyStore = undefined
 
+findRecordsMulti ::(Storeable a)
+                   => Connection
+                   -> [Filter a] -> IO (Either String [Entity a])
+findRecordsMulti db fs = undefined
+    -- let sql = "SELECT " ++ genFields (fieldStore f)
+    --            ++  " FROM "
+    --            ++ storeName (fieldStore f) ++ " WHERE " ++
+    --            fieldOf f ++ " = ? LIMIT 1"
+    --     finQry = Query $ B.pack sql
+    -- res:_ <- PQ.query db finQry (Only $ toStore val)
+    -- return $ Right res
 
+
+
+deleteRecord db (Entity eid old)= do
+    let sql = "DELETE FROM " ++ storeName old ++
+              " WHERE id = ?"
+        finSql = Query $ B.pack sql
+    _ <- PQ.execute db finSql (Only $ unKey eid)
+    return $ Right ()
+    where
+        updateFields a = intercalate ", " $
+              map (\(Field x) -> fieldOf x ++ "=? ") (storeFields a)
+
+findRecordByUnique :: (Storeable a, Convertible val StoreVal)
+                      => Connection
+                      -> StoreField a val
+                      -> val
+                      -> IO (Either String (Entity a))
+findRecordByUnique db f val = do
+    let sql = "SELECT " ++ genFields (fieldStore f)
+               ++  " FROM "
+               ++ storeName (fieldStore f) ++ " WHERE " ++
+               fieldOf f ++ " = ? LIMIT 1"
+        finQry = Query $ B.pack sql
+    res:_ <- PQ.query db finQry (Only $ toStore val)
+    return $ Right res
+    -- return $ Right $ Entries res
+
+
+updateRecord db (Entity oid old) new = do
+    let sql = "UPDATE " ++ storeName old ++ " SET " ++
+              updateFields old ++ " WHERE id = ?"
+        finSql = Query $ B.pack sql
+    _ <- PQ.execute db finSql (toRow new ++ [toField (unKey oid)] )
+    return $ Right new
+    where
+        updateFields a = intercalate ", " $
+              map (\(Field x) -> fieldOf x ++ "=? ") (storeFields a)
 
 filterQuery :: (Storeable a)
                => Connection
                -> SimpleQuery a
                -> IO (Either String (QueryResult a))
 filterQuery db qry = do
-    let sql = "SELECT " ++ genFields (querySubject qry)
+    let sql = "SELECT " ++ selectFor qry
                ++  " FROM "
                ++ queryStore qry ++ " "
         sql' = sql ++ filterClause qry ++ sortClause qry ++ limitClause qry
         finQry = Query $ B.pack sql'
-    putStrLn $ "Query: " ++ sql'
-    res <- PQ.query_ db finQry
-    return $ Right $ Entries res
+    case qResult qry of
+        ResultAll -> do
+            res <- PQ.query db finQry (filterFieldsFor qry)
+            return $ Right $ Entries res
+        ResultCount -> do
+            res <- PQ.query db finQry (filterFieldsFor qry)
+            let Only z = head res
+            return $ Right $ Count z
+    where
+        filterFieldsFor q =
+            concatMap filterParse (qInt q ++ qUnion q)
+            where
+                filterParse (Filter _ v) = [toStore v]
+                filterParse (RangeFilter _ x y) = [toStore x, toStore y]
+        selectFor q = case qResult q of
+            ResultAll ->  genFields (querySubject q)
+            ResultCount -> " COUNT(*) "
 
 
 genFields :: Storeable a =>  a -> String
@@ -70,10 +148,10 @@ filterClause SimpleQuery{..} = prefix ++  intersects ++ iuJoin ++ unions
 
 unionClause :: [Filter a] -> String
 unionClause [] = ""
-unionClause fs = "( " ++ intercalate " OR " (map clause fs) ++ " )"
-    where
-        clause (Filter x _) = let name = fieldOf x
-                              in "`" ++ name ++ "` = ?"
+unionClause fs = "( " ++ intercalate " OR " (map filterClause' fs) ++ " )"
+    -- where
+    --     clause (Filter x _) = let name = fieldOf x
+    --                           in "`" ++ name ++ "` = ?"
 
 
 
@@ -119,10 +197,14 @@ findRecord db kid = do
 
 whereClause :: [Filter a] -> String
 whereClause [] = ""
-whereClause fs = "( " ++ intercalate " AND " (map clause fs) ++ " )"
-    where
-        clause (Filter x _) = let name = fieldOf x
-                              in "`" ++ name ++ "` = ?"
+whereClause fs = "( " ++ intercalate " AND " (map filterClause' fs) ++ " )"
+
+
+filterClause' (Filter x _) = let name = fieldOf x
+                             in "`" ++ name ++ "` = ?"
+filterClause' (RangeFilter x _ _) = let name = fieldOf x
+                                    in "(`" ++ name ++ "` >= ? AND `" ++
+                                       name ++ "` <= ?)"
 
 
 
